@@ -13,9 +13,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Fija orientación vertical y barra de estado en Modo Oscuro puro
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+  } catch (_) {}
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -26,7 +29,11 @@ Future<void> main() async {
   );
 
   final alarmController = AlarmController();
-  await alarmController.initialize();
+  try {
+    await alarmController.initialize();
+  } catch (e) {
+    debugPrint('[ANTIZOMBI] Error en inicialización de controladores: $e');
+  }
 
   runApp(
     ChangeNotifierProvider<AlarmController>.value(

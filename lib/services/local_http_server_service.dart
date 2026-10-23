@@ -13,6 +13,7 @@ import '../models/alarm_state_model.dart';
 /// Recibe la petición de apagado enviada por la ESP32 al conectarse a la corriente.
 class LocalHttpServerService {
   HttpServer? _server;
+  RawDatagramSocket? _udpSocket;
   String? _localIpAddress;
   int _port = 8080;
 
@@ -66,6 +67,37 @@ class LocalHttpServerService {
       _port,
       shared: true,
     );
+
+    // Escucha de difusión UDP (Broadcast 255.255.255.255) para que la ESP32
+    // pueda apagar la alarma sin conocer la IP del teléfono (Zero-Configuration).
+    try {
+      _udpSocket?.close();
+      _udpSocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        _port,
+        reuseAddress: true,
+        reusePort: true,
+      );
+      _udpSocket?.broadcastEnabled = true;
+      _udpSocket?.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          final datagram = _udpSocket?.receive();
+          if (datagram != null) {
+            final msg = utf8.decode(datagram.data).trim();
+            if (msg.toUpperCase().contains('OFF') ||
+                msg.contains('esp32-alarma')) {
+              final wakeEvent = Esp32WakeEvent(
+                sourceIp: datagram.address.address,
+                hostname: 'esp32-alarma.local',
+                timestamp: DateTime.now(),
+                triggerMethod: 'UDP_BROADCAST_255.255.255.255',
+              );
+              onEsp32ShutdownReceived(wakeEvent);
+            }
+          }
+        }
+      });
+    } catch (_) {}
   }
 
   /// Procesa la petición HTTP de la ESP32 para detener la alarma inmediatamente.
@@ -167,8 +199,10 @@ class LocalHttpServerService {
     }
   }
 
-  /// Detiene el servidor HTTP local cuando ya no es necesario.
+  /// Detiene el servidor HTTP local y el socket UDP cuando ya no son necesarios.
   Future<void> stopServer() async {
+    _udpSocket?.close();
+    _udpSocket = null;
     await _server?.close(force: true);
     _server = null;
   }

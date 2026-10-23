@@ -24,7 +24,7 @@ class NotificationService {
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const DarwinInitializationSettings iosSettings =
+    const DarwinInitializationSettings darwinSettings =
         DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -34,20 +34,25 @@ class NotificationService {
 
     const InitializationSettings initSettings = InitializationSettings(
       android: androidSettings,
-      iOS: iosSettings,
+      iOS: darwinSettings,
+      macOS: darwinSettings,
     );
 
-    await _notificationsPlugin.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: onNotificationTap,
-    );
+    try {
+      await _notificationsPlugin.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: onNotificationTap,
+      );
 
-    // Solicitar permisos en Android 13+
-    final androidImplementation =
-        _notificationsPlugin.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
-    await androidImplementation?.requestNotificationsPermission();
-    await androidImplementation?.requestExactAlarmsPermission();
+      // Solicitar permisos en Android 13+
+      final androidImplementation =
+          _notificationsPlugin.resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+      await androidImplementation?.requestNotificationsPermission();
+      await androidImplementation?.requestExactAlarmsPermission();
+    } catch (_) {
+      // Ignora errores si la plataforma de escritorio no soporta notificaciones de forma nativa
+    }
 
     _initialized = true;
   }
@@ -71,7 +76,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+    const DarwinNotificationDetails darwinDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
@@ -80,7 +85,8 @@ class NotificationService {
 
     const NotificationDetails details = NotificationDetails(
       android: androidDetails,
-      iOS: iosDetails,
+      iOS: darwinDetails,
+      macOS: darwinDetails,
     );
 
     final tz.TZDateTime tzScheduled =
@@ -118,18 +124,24 @@ class NotificationService {
       autoCancel: false,
     );
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+    const DarwinNotificationDetails darwinDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentSound: true,
       interruptionLevel: InterruptionLevel.critical,
     );
 
-    await _notificationsPlugin.show(
-      alarmNotificationId,
-      '¡ALARMA ANTIZOMBI ACTIVA!',
-      'Ve a la sala y conecta la ESP32 para detener la alarma.',
-      const NotificationDetails(android: androidDetails, iOS: iosDetails),
-    );
+    try {
+      await _notificationsPlugin.show(
+        alarmNotificationId,
+        '¡ALARMA ANTIZOMBI ACTIVA!',
+        'Ve a la sala y conecta la ESP32 para detener la alarma.',
+        const NotificationDetails(
+          android: androidDetails,
+          iOS: darwinDetails,
+          macOS: darwinDetails,
+        ),
+      );
+    } catch (_) {}
   }
 
   /// Cancela todas las notificaciones de la alarma cuando la ESP32 la apaga.

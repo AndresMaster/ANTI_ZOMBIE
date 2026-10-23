@@ -1,89 +1,129 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
+
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Servicio encargado de reproducir el sonido de alarma continuo e insistente
-/// con prioridad de canal de Alarma en Android e iOS.
+/// con prioridad de canal de Alarma en Android, iOS y macOS.
 class AlarmAudioService {
   final AudioPlayer _audioPlayer = AudioPlayer();
-  Timer? _hapticTimer;
+  Timer? _alertPulseTimer;
   bool _isPlaying = false;
 
   bool get isPlaying => _isPlaying;
 
   /// Inicializa el contexto de audio de alta prioridad para despertar al usuario.
   Future<void> initialize() async {
-    await AudioPlayer.global.setAudioContext(
-      AudioContext(
-        iOS: AudioContextIOS(
-          category: AVAudioSessionCategory.playback,
-          options: const {
-            AVAudioSessionOptions.mixWithOthers,
-          },
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: const {
+              AVAudioSessionOptions.mixWithOthers,
+            },
+          ),
+          android: const AudioContextAndroid(
+            isSpeakerphoneOn: true,
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransientExclusive,
+          ),
         ),
-        android: const AudioContextAndroid(
-          isSpeakerphoneOn: true,
-          stayAwake: true,
-          contentType: AndroidContentType.sonification,
-          usageType: AndroidUsageType.alarm,
-          audioFocus: AndroidAudioFocus.gainTransientExclusive,
-        ),
-      ),
-    );
-    await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-    await _audioPlayer.setVolume(1.0);
+      );
+    } catch (e) {
+      debugPrint('[AUDIO] AudioContext notice: $e');
+    }
+
+    try {
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _audioPlayer.setVolume(1.0);
+    } catch (_) {}
   }
 
-  /// Inicia la sirena de alarma continua en bucle y vibración háptica insistente.
-  /// Si existe `assets/sounds/alarm_siren.mp3` lo reproduce; de lo contrario,
-  /// sintetiza en memoria una sirena bitonal WAV de alta intensidad (880Hz / 1320Hz)
-  /// para garantizar que la alarma suene siempre sin fallar por falta de archivos.
+  /// Inicia la sirena de alarma continua en bucle y pulso auditivo/háptico insistente.
   Future<void> startAlarmSound() async {
     if (_isPlaying) return;
     _isPlaying = true;
 
-    await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-    await _audioPlayer.setVolume(1.0);
-
     try {
-      // Verifica si el asset personalizado existe en el bundle
-      await rootBundle.load('assets/sounds/alarm_siren.mp3');
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _audioPlayer.setVolume(1.0);
+    } catch (_) {}
+
+    bool playedSuccessfully = false;
+
+    // 1. Intenta reproducir el asset alarm_siren.wav
+    try {
+      await rootBundle.load('assets/sounds/alarm_siren.wav');
       await _audioPlayer.play(
-        AssetSource('sounds/alarm_siren.mp3'),
+        AssetSource('sounds/alarm_siren.wav'),
         volume: 1.0,
       );
-    } catch (_) {
-      // Fallback garantizado: genera sirena WAV bitonal de alta urgencia en memoria
-      final Uint8List wavBytes = _generateHighUrgencySirenWav();
-      await _audioPlayer.play(
-        BytesSource(wavBytes, mimeType: 'audio/wav'),
-        volume: 1.0,
-      );
+      playedSuccessfully = true;
+      debugPrint('[AUDIO] Reproduciendo sirena desde AssetSource(alarm_siren.wav)');
+    } catch (e) {
+      debugPrint('[AUDIO] Asset WAV no disponible: $e');
     }
 
-    // Pulso háptico adicional cada 800 ms mientras suena la alarma
-    _hapticTimer?.cancel();
-    _hapticTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      HapticFeedback.vibrate();
+    // 2. Si no cargó el asset WAV, intenta con alarm_siren.mp3
+    if (!playedSuccessfully) {
+      try {
+        await rootBundle.load('assets/sounds/alarm_siren.mp3');
+        await _audioPlayer.play(
+          AssetSource('sounds/alarm_siren.mp3'),
+          volume: 1.0,
+        );
+        playedSuccessfully = true;
+        debugPrint('[AUDIO] Reproduciendo sirena desde AssetSource(alarm_siren.mp3)');
+      } catch (_) {}
+    }
+
+    // 3. Fallback garantizado para macOS / iOS / Android:
+    // Escribe la sirena WAV en el disco temporal y la reproduce mediante DeviceFileSource
+    if (!playedSuccessfully) {
+      try {
+        final Uint8List wavBytes = _generateHighUrgencySirenWav();
+        final tempFile = File('${Directory.systemTemp.path}/antizombi_siren.wav');
+        await tempFile.writeAsBytes(wavBytes, flush: true);
+        await _audioPlayer.play(
+          DeviceFileSource(tempFile.path),
+          volume: 1.0,
+        );
+        playedSuccessfully = true;
+        debugPrint('[AUDIO] Reproduciendo sirena desde archivo temporal: ${tempFile.path}');
+      } catch (e) {
+        debugPrint('[AUDIO] Error con archivo temporal: $e');
+      }
+    }
+
+    // Pulso complementario (Vibración en móvil y sonido de alerta del sistema en macOS)
+    _alertPulseTimer?.cancel();
+    _alertPulseTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      if (!_isPlaying) return;
+      HapticFeedback.heavyImpact();
+      SystemSound.play(SystemSoundType.alert);
     });
   }
 
-  /// Detiene inmediatamente el sonido de la alarma y las vibraciones.
+  /// Detiene inmediatamente el sonido de la alarma y los pulsos de alerta.
   Future<void> stopAlarmSound() async {
     _isPlaying = false;
-    _hapticTimer?.cancel();
-    _hapticTimer = null;
+    _alertPulseTimer?.cancel();
+    _alertPulseTimer = null;
     try {
       await _audioPlayer.stop();
     } catch (_) {}
   }
 
   /// Sintetiza un archivo WAV PCM de 16-bit (2 segundos en bucle continuo)
-  /// alternando frecuencias de alarma (880 Hz y 1320 Hz con armónicos).
+  /// alternando frecuencias de alarma de alta urgencia (800 Hz y 1200 Hz).
   Uint8List _generateHighUrgencySirenWav() {
-    const int sampleRate = 22050;
+    const int sampleRate = 44100;
     const int durationSeconds = 2;
     const int numSamples = sampleRate * durationSeconds;
     const int numChannels = 1;
@@ -94,12 +134,12 @@ class AlarmAudioService {
 
     final ByteData buffer = ByteData(44 + dataSize);
 
-    // Cabecera RIFF / WAVE
+    // Cabecera RIFF / WAVE estándar
     _writeAscii(buffer, 0, 'RIFF');
     buffer.setUint32(4, totalSize, Endian.little);
     _writeAscii(buffer, 8, 'WAVE');
     _writeAscii(buffer, 12, 'fmt ');
-    buffer.setUint32(16, 16, Endian.little); // Subchunk1Size (PCM)
+    buffer.setUint32(16, 16, Endian.little); // Subchunk1Size (PCM = 16)
     buffer.setUint16(20, 1, Endian.little); // AudioFormat (1 = PCM)
     buffer.setUint16(22, numChannels, Endian.little);
     buffer.setUint32(24, sampleRate, Endian.little);
@@ -109,22 +149,21 @@ class AlarmAudioService {
     _writeAscii(buffer, 36, 'data');
     buffer.setUint32(40, dataSize, Endian.little);
 
-    // Síntesis de onda cuadrada suavizada bitonal (patrón de alarma despertador)
+    // Síntesis de sirena de alta intensidad
     for (int i = 0; i < numSamples; i++) {
       final double t = i / sampleRate;
-      // Alterna cada 0.25s entre 960 Hz y 1440 Hz, con breve silencio en el último 10%
       final double cyclePos = (t * 4) % 1.0;
       final bool isHighTone = ((t * 2).floor() % 2) == 0;
-      final double freq = isHighTone ? 1320.0 : 920.0;
+      final double freq = isHighTone ? 1200.0 : 800.0;
 
       double sample = 0.0;
-      if (cyclePos < 0.85) {
+      if (cyclePos < 0.82) {
         final double fundamental = math.sin(2 * math.pi * freq * t);
-        final double harmonic = 0.35 * math.sin(2 * math.pi * (freq * 2) * t);
-        sample = ((fundamental + harmonic) / 1.35).clamp(-1.0, 1.0);
+        final double harmonic = 0.3 * math.sin(2 * math.pi * (freq * 2) * t);
+        sample = ((fundamental + harmonic) / 1.3).clamp(-1.0, 1.0);
       }
 
-      final int pcmValue = (sample * 28000).toInt();
+      final int pcmValue = (sample * 29000).toInt();
       buffer.setInt16(44 + (i * 2), pcmValue, Endian.little);
     }
 

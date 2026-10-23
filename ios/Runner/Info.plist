@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
-	<!-- Permisos requeridos en iOS 14+ para Servidor HTTP Local y mDNS (Bonjour) -->
+	<!-- Permisos requeridos para Servidor HTTP Local y mDNS (Bonjour) -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Alarma ESP32 Antizombi utiliza la red Wi-Fi local y mDNS para detectar cuando conectas tu ESP32 en la sala y apagar la alarma.</string>
 	<key>NSBonjourServices</key>
@@ -53,5 +53,31 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<!-- UIScene Lifecycle obligatorio para iOS 18+ y Xcode 16+ -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>
